@@ -7,4 +7,10 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.66"
-git2 = "0.15.0"
+nanoserde = "0.1.37"
+semver = "1.0.21"
+ureq = "2.9.6"
+log = "0.4"
+pretty_env_logger = "0.5"
+argh = "0.1.12"
+dialoguer = { version = "0.11.0", default-features = false }
