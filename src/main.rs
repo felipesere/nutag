@@ -28,15 +28,14 @@ struct Args {
     /// suggest the next prerelease version
     #[argh(switch)]
     pre: bool,
+
+    /// lower the log level to Debug
+    #[argh(switch)]
+    verbose: bool,
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    pretty_env_logger::formatted_builder()
-        .filter_module("nutag", log::LevelFilter::Info)
-        .parse_default_env()
-        .init();
-
-    let args: Args = argh::from_env();
+    let mut args: Args = argh::from_env();
     if [args.major, args.minor, args.patch]
         .iter()
         .filter(|v| **v)
@@ -52,7 +51,31 @@ fn main() -> Result<(), anyhow::Error> {
         .count()
         == 0
     {
-        bail!("Need to set at least one of --major, --minor, --patch, --pre");
+        info!("No flags given, assuming pretag");
+        args.pre = true;
+    }
+
+    let log_level = if args.verbose {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+    pretty_env_logger::formatted_builder()
+        .filter(None, log_level)
+        .parse_default_env()
+        .init();
+
+    let branch_name = git(&["branch", "--show-current"])?;
+    let on_default_branch = ["main", "master"].contains(&branch_name.as_str());
+
+    if on_default_branch && args.pre {
+        error!("Pretags are only allowed on branches");
+        bail!("branch/parameter missmatch");
+    }
+
+    if !on_default_branch && !args.pre {
+        error!("On branches other than main/master you have to use --pre");
+        bail!("branch/parameter missmatch");
     }
 
     info!("Updating local tags via git");
