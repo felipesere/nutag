@@ -6,8 +6,10 @@ use anyhow::{anyhow, bail, Context};
 use argh::FromArgs;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input};
+use fern::colors::ColoredLevelConfig;
 use log::{error, info};
 use nanoserde::DeJson;
+use regex_lite::Regex;
 use semver::{BuildMetadata, Prerelease};
 
 #[derive(Debug, FromArgs)]
@@ -34,6 +36,18 @@ struct Args {
     verbose: bool,
 }
 
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            major: false,
+            minor: false,
+            patch: false,
+            pre: true,
+            verbose: false,
+        }
+    }
+}
+
 fn main() -> Result<(), anyhow::Error> {
     let mut args: Args = argh::from_env();
     if [args.major, args.minor, args.patch]
@@ -58,12 +72,21 @@ fn main() -> Result<(), anyhow::Error> {
     let log_level = if args.verbose {
         log::LevelFilter::Debug
     } else {
-        log::LevelFilter::Info
+        log::LevelFilter::Warn
     };
-    pretty_env_logger::formatted_builder()
-        .filter(None, log_level)
-        .parse_default_env()
-        .init();
+
+    let colors = ColoredLevelConfig::default();
+    fern::Dispatch::new()
+        .format(move |out, message, record| {
+            out.finish(format_args!(
+                "{}: {}",
+                colors.color(record.level()),
+                message
+            ))
+        })
+        .level(log_level)
+        .chain(std::io::stderr())
+        .apply()?;
 
     let branch_name = git(&["branch", "--show-current"])?;
     let on_default_branch = ["main", "master"].contains(&branch_name.as_str());
@@ -84,12 +107,24 @@ fn main() -> Result<(), anyhow::Error> {
     let github_token = std::env::var("GITHUB_TOKEN")
         .context("missing api tokent ($GITHUB_TOKEN) to talk to github")?;
 
+    let url = git(&["config", "--get", "remote.origin.url"])?;
+    let extract_repo_name = Regex::new(r#"^([^:]+):TrueLayer/([^\.]+).git$"#).unwrap();
+
+    let Some(caps) = extract_repo_name.captures(&url) else {
+        bail!("Repo does not seem to be a TrueLayer one");
+    };
+
+    let name = &caps[2];
+    info!("Going to fetch tags for {name}");
+
     info!("Fetching tags...");
-    let response = ureq::get("https://api.github.com/repos/TrueLayer/releaser/git/refs/tags/v")
-        .set("Accept", "application/vnd.github+json")
-        .set("Authorization", &format!("Bearer {github_token}"))
-        .set("X-GitHub-Api-Version", "2022-11-28")
-        .call()?;
+    let response = ureq::get(&format!(
+        "https://api.github.com/repos/TrueLayer/{name}/git/refs/tags/v"
+    ))
+    .set("Accept", "application/vnd.github+json")
+    .set("Authorization", &format!("Bearer {github_token}"))
+    .set("X-GitHub-Api-Version", "2022-11-28")
+    .call()?;
 
     if response.status() != 200 {
         error!(
@@ -290,6 +325,7 @@ mod tests {
                 minor: false,
                 patch: false,
                 pre: false,
+                ..Default::default()
             },
         );
 
@@ -306,6 +342,7 @@ mod tests {
                 minor: true,
                 patch: false,
                 pre: false,
+                ..Default::default()
             },
         );
 
@@ -322,6 +359,7 @@ mod tests {
                 minor: false,
                 patch: true,
                 pre: false,
+                ..Default::default()
             },
         );
 
@@ -338,6 +376,7 @@ mod tests {
                 minor: false,
                 patch: false,
                 pre: true,
+                ..Default::default()
             },
         );
 
@@ -354,6 +393,7 @@ mod tests {
                 minor: false,
                 patch: false,
                 pre: true,
+                ..Default::default()
             },
         );
 
@@ -370,6 +410,7 @@ mod tests {
                 minor: true,
                 patch: false,
                 pre: true,
+                ..Default::default()
             },
         );
 
@@ -383,6 +424,7 @@ mod tests {
                 minor: false,
                 patch: false,
                 pre: true,
+                ..Default::default()
             },
         );
 
