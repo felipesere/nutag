@@ -6,9 +6,9 @@ use anyhow::{anyhow, bail, Context};
 use argh::FromArgs;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input};
-use fern::colors::ColoredLevelConfig;
 use log::{error, info};
 use nanoserde::DeJson;
+use owo_colors::OwoColorize;
 use regex_lite::Regex;
 use semver::{BuildMetadata, Prerelease};
 
@@ -75,14 +75,17 @@ fn main() -> Result<(), anyhow::Error> {
         log::LevelFilter::Warn
     };
 
-    let colors = ColoredLevelConfig::default();
     fern::Dispatch::new()
         .format(move |out, message, record| {
-            out.finish(format_args!(
-                "{}: {}",
-                colors.color(record.level()),
-                message
-            ))
+            let level = match record.level() {
+                log::Level::Error => "ERROR".red().to_string(),
+                log::Level::Warn => "WARN".yellow().to_string(),
+                log::Level::Info => "INFO".blue().to_string(),
+                log::Level::Debug => "DEBUG".green().to_string(),
+                log::Level::Trace => "TRACE".magenta().to_string(),
+            };
+
+            out.finish(format_args!("{level}: {message}",))
         })
         .level(log_level)
         .chain(std::io::stderr())

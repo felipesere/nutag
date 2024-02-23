@@ -11,7 +11,13 @@ nanoserde = "0.1.37"
 semver = "1.0.21"
 ureq = "2.9.6"
 log = "0.4"
-fern = { version = "0.6", default-features = false, features = ["colored"] }
+fern = { version = "0.6", default-features = false }
 argh = "0.1.12"
 dialoguer = { version = "0.11.0", default-features = false }
 regex-lite = "0.1.5"
+owo-colors = "4.0.0"
+
+[profile.release]
+lto = "fat"
+opt-level = "z"
+strip = "symbols"
