@@ -6,8 +6,8 @@ use anyhow::{anyhow, bail, Context};
 use argh::FromArgs;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input};
-use log::{error, info};
-use nanoserde::DeJson;
+use log::{debug, error, info, warn};
+use nanoserde::{DeJson, SerJson};
 use owo_colors::OwoColorize;
 use regex_lite::Regex;
 use semver::{BuildMetadata, Prerelease};
@@ -34,6 +34,10 @@ struct Args {
     /// lower the log level to Debug
     #[argh(switch)]
     verbose: bool,
+
+    /// create the tag locally but don't push it
+    #[argh(switch)]
+    no_push: bool,
 }
 
 impl Default for Args {
@@ -44,6 +48,7 @@ impl Default for Args {
             patch: false,
             pre: true,
             verbose: false,
+            no_push: false,
         }
     }
 }
@@ -91,6 +96,10 @@ fn main() -> Result<(), anyhow::Error> {
         .chain(std::io::stderr())
         .apply()?;
 
+    if args.no_push {
+        warn!("Not going to push tag");
+    }
+
     let branch_name = git(&["branch", "--show-current"])?;
     let on_default_branch = ["main", "master"].contains(&branch_name.as_str());
 
@@ -100,8 +109,8 @@ fn main() -> Result<(), anyhow::Error> {
     }
 
     if !on_default_branch && !args.pre {
-        error!("On branches other than main/master you have to use --pre");
-        bail!("branch/parameter missmatch");
+        warn!("On branches other than main/master '--pre' is implied");
+        args.pre = true;
     }
 
     info!("Updating local tags via git");
@@ -120,14 +129,51 @@ fn main() -> Result<(), anyhow::Error> {
     let name = &caps[2];
     info!("Going to fetch tags for {name}");
 
+    #[derive(SerJson)]
+    struct GqlRequest<'a> {
+        query: &'static str,
+        variables: Variables<'a>,
+    }
+
+    #[derive(SerJson)]
+    struct Variables<'a> {
+        owner: &'static str,
+        name: &'a str,
+    }
+
+    let query = indoc::indoc! {r#"
+          query ($owner: String!, $name: String!, $endCursor: String) {
+            repository(owner: $owner, name: $name) {
+              refs(refPrefix: "refs/tags/", first: 20, after: $endCursor, orderBy:{field: TAG_COMMIT_DATE, direction: DESC }) {
+                 pageInfo {
+                  endCursor
+                  hasNextPage
+                }
+                nodes {
+                  name
+                }
+              }
+            }
+          }
+        "#
+    };
+
+    let body = nanoserde::SerJson::serialize_json(&GqlRequest {
+        query,
+        variables: Variables {
+            owner: "TrueLayer",
+            name,
+        },
+    });
+
+    debug!("The query is:\n{body}");
+
     info!("Fetching tags...");
-    let response = ureq::get(&format!(
-        "https://api.github.com/repos/TrueLayer/{name}/git/refs/tags/v"
-    ))
-    .set("Accept", "application/vnd.github+json")
-    .set("Authorization", &format!("Bearer {github_token}"))
-    .set("X-GitHub-Api-Version", "2022-11-28")
-    .call()?;
+    let response = ureq::post("https://api.github.com/graphql")
+        .set("Accept", "application/vnd.github+json")
+        .set("Authorization", &format!("Bearer {github_token}"))
+        .set("X-GitHub-Api-Version", "2022-11-28")
+        .send_bytes(body.as_bytes())?;
 
     if response.status() != 200 {
         error!(
@@ -138,30 +184,38 @@ fn main() -> Result<(), anyhow::Error> {
     }
     let body = response.into_string().unwrap();
 
-    let refs: Vec<Ref> =
+    let gql: Graphql =
         nanoserde::DeJson::deserialize_json(&body).context("to extract ref data from response")?;
 
     info!(
         "Going to check for {n} tags for compatibility",
-        n = refs.len()
+        n = gql.data.repository.refs.nodes.len()
     );
 
-    let mut tags: Vec<_> = refs
+    let mut tags: Vec<_> = gql
+        .data
+        .repository
+        .refs
+        .nodes
         .into_iter()
-        .filter_map(|raw| {
-            let raw = raw.git_ref;
-            let tag = raw.strip_prefix("refs/tags/").unwrap_or(&raw);
-            Tag::try_from(tag).ok()
-        })
+        .filter_map(|name| Tag::try_from(name.name).ok())
         .collect();
 
     tags.sort();
 
     info!("Left with {n} repos afterwards.", n = tags.len());
-    let mut proper_releases: Vec<_> = tags.into_iter().filter(|tag| tag.is_release()).collect();
+    // let mut proper_releases: Vec<_> = tags.into_iter().filter(|tag| tag.is_release()).collect();
 
-    let last_release: Tag = proper_releases.pop().unwrap_or(Tag::initial());
-    let next = increment_tag(last_release, &args);
+    info!(
+        "Considered tags: {}",
+        tags.iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(",\n")
+    );
+
+    let latest_tag: Tag = tags.pop().unwrap_or(Tag::initial());
+    let next = increment_tag(latest_tag, &args);
     let prompt_theme = ColorfulTheme::default();
     'tag: loop {
         let version: String = Input::with_theme(&prompt_theme)
@@ -177,8 +231,11 @@ fn main() -> Result<(), anyhow::Error> {
         match git(&["tag", t.to_string().as_str()]) {
             Ok(_) => {
                 info!("Successfully tagged {t}, pushing.");
-                git(&["push", "--tags"])?;
-                info!("Done");
+
+                if !args.no_push {
+                    git(&["push", "--tags"])?;
+                    info!("Done pushing tag");
+                }
                 break 'tag;
             }
             Err(e) => {
@@ -200,9 +257,28 @@ fn main() -> Result<(), anyhow::Error> {
 }
 
 #[derive(Debug, DeJson)]
-struct Ref {
-    #[nserde(rename = "ref")]
-    git_ref: String,
+struct Graphql {
+    data: Data,
+}
+
+#[derive(Debug, DeJson)]
+struct Data {
+    repository: Repository,
+}
+
+#[derive(Debug, DeJson)]
+struct Repository {
+    refs: Refs,
+}
+
+#[derive(Debug, DeJson)]
+struct Refs {
+    nodes: Vec<Name>,
+}
+
+#[derive(Debug, DeJson)]
+struct Name {
+    name: String,
 }
 
 fn git(args: &[&str]) -> Result<String, anyhow::Error> {
@@ -222,10 +298,6 @@ fn git(args: &[&str]) -> Result<String, anyhow::Error> {
 struct Tag(semver::Version);
 
 impl Tag {
-    fn is_release(&self) -> bool {
-        self.0.pre.is_empty()
-    }
-
     fn initial() -> Self {
         Self(semver::Version::parse("0.1.0").unwrap())
     }
