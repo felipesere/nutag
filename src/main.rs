@@ -55,24 +55,6 @@ impl Default for Args {
 
 fn main() -> Result<(), anyhow::Error> {
     let mut args: Args = argh::from_env();
-    if [args.major, args.minor, args.patch]
-        .iter()
-        .filter(|v| **v)
-        .count()
-        > 1
-    {
-        bail!("Can't set --major, --minor, --patch together");
-    }
-
-    if [args.major, args.minor, args.patch, args.pre]
-        .iter()
-        .filter(|v| **v)
-        .count()
-        == 0
-    {
-        info!("No flags given, assuming pretag");
-        args.pre = true;
-    }
 
     let log_level = if args.verbose {
         log::LevelFilter::Debug
@@ -96,12 +78,36 @@ fn main() -> Result<(), anyhow::Error> {
         .chain(std::io::stderr())
         .apply()?;
 
-    if args.no_push {
-        warn!("Not going to push tag");
+    if [args.major, args.minor, args.patch]
+        .iter()
+        .filter(|v| **v)
+        .count()
+        > 1
+    {
+        bail!("Can't set --major, --minor, --patch together");
     }
 
     let branch_name = git(&["branch", "--show-current"])?;
     let on_default_branch = ["main", "master"].contains(&branch_name.as_str());
+
+    if [args.major, args.minor, args.patch, args.pre]
+        .iter()
+        .filter(|v| **v)
+        .count()
+        == 0
+    {
+        if on_default_branch {
+            info!("No flags given, assuming patch");
+            args.patch = true;
+        } else {
+            info!("No flags given, assuming pretag");
+            args.pre = true;
+        }
+    }
+
+    if args.no_push {
+        warn!("Not going to push tag");
+    }
 
     if on_default_branch && args.pre {
         error!("Pretags are only allowed on branches");
