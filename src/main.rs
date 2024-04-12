@@ -38,6 +38,10 @@ struct Args {
     /// create the tag locally but don't push it
     #[argh(switch)]
     no_push: bool,
+
+    /// a prefix to use when creating the tag
+    #[argh(positional)]
+    prefix: Option<String>,
 }
 
 impl Default for Args {
@@ -49,6 +53,7 @@ impl Default for Args {
             pre: true,
             verbose: false,
             no_push: false,
+            prefix: None,
         }
     }
 }
@@ -150,7 +155,7 @@ fn main() -> Result<(), anyhow::Error> {
     let query = indoc::indoc! {r#"
           query ($owner: String!, $name: String!, $endCursor: String) {
             repository(owner: $owner, name: $name) {
-              refs(refPrefix: "refs/tags/", first: 20, after: $endCursor, orderBy:{field: TAG_COMMIT_DATE, direction: DESC }) {
+              refs(refPrefix: "refs/tags/", first: 30, after: $endCursor, orderBy:{field: TAG_COMMIT_DATE, direction: DESC }) {
                  pageInfo {
                   endCursor
                   hasNextPage
@@ -205,6 +210,7 @@ fn main() -> Result<(), anyhow::Error> {
         .nodes
         .into_iter()
         .filter_map(|name| Tag::try_from(name.name).ok())
+        .filter(|tag| tag.prefix == args.prefix)
         .collect();
 
     tags.sort();
@@ -224,13 +230,13 @@ fn main() -> Result<(), anyhow::Error> {
     let next = increment_tag(latest_tag, &args);
     let prompt_theme = ColorfulTheme::default();
     'tag: loop {
-        let version: String = Input::with_theme(&prompt_theme)
+        let t: Tag = Input::with_theme(&prompt_theme)
             .with_prompt("Next tag")
             .default(next.to_string())
             .validate_with(|input: &String| Tag::try_from(input.as_str()).map(|_| ()))
-            .interact_text()?;
-
-        let t = Tag::try_from(version)?;
+            .interact_text()
+            .map_err(|e| anyhow::anyhow!(e))
+            .and_then(Tag::try_from)?;
 
         info!("Creating tag {t}");
 
@@ -301,22 +307,32 @@ fn git(args: &[&str]) -> Result<String, anyhow::Error> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-struct Tag(semver::Version);
+struct Tag {
+    prefix: Option<String>,
+    v: semver::Version,
+}
 
 impl Tag {
     fn initial() -> Self {
-        Self(semver::Version::parse("0.1.0").unwrap())
+        Self {
+            prefix: None,
+            v: semver::Version::parse("0.1.0").unwrap(),
+        }
     }
 
     fn is_prelease(&self) -> bool {
-        !self.0.pre.is_empty()
+        !self.v.pre.is_empty()
     }
 }
 
 impl Display for Tag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(prefix) = &self.prefix {
+            f.write_str(prefix)?;
+            f.write_char('@')?;
+        }
         f.write_char('v')?;
-        self.0.fmt(f)
+        self.v.fmt(f)
     }
 }
 
@@ -324,10 +340,7 @@ impl TryFrom<&str> for Tag {
     type Error = anyhow::Error;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let raw = value.strip_prefix("v").unwrap_or(&value);
-        raw.parse()
-            .map(Tag)
-            .map_err(|e| anyhow!("Failed to parse tag: {e}"))
+        value.to_string().try_into()
     }
 }
 
@@ -335,50 +348,61 @@ impl TryFrom<String> for Tag {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let raw = value.strip_prefix("v").unwrap_or(&value);
-        raw.parse()
-            .map(Tag)
-            .map_err(|e| anyhow!("Failed to parse tag: {e}"))
+        let (prefix, tag) = if let Some((prefix, tag)) = value.split_once('@') {
+            (Some(prefix.to_string()), tag)
+        } else {
+            (None, value.as_str())
+        };
+
+        let raw = tag.strip_prefix("v").unwrap_or(&value);
+        let v: semver::Version = raw
+            .parse()
+            .map_err(|e| anyhow!("Failed to parse tag: {e}"))?;
+
+        Ok(Tag { prefix, v })
     }
 }
 
 fn increment_tag(before: Tag, params: &Args) -> Tag {
-    let mut next = before.0.clone();
-    next.build = BuildMetadata::from_str("").unwrap();
+    let mut next_v = before.v.clone();
+    next_v.build = BuildMetadata::from_str("").unwrap();
     if params.major {
-        next.major += 1;
-        next.minor = 0;
-        next.patch = 0;
-        next.pre = if params.pre {
-            next_prerelease(&before.0.pre)
+        next_v.major += 1;
+        next_v.minor = 0;
+        next_v.patch = 0;
+        next_v.pre = if params.pre {
+            next_prerelease(&before.v.pre)
         } else {
             Prerelease::from_str("").unwrap()
         };
     }
     if params.minor {
-        next.minor += 1;
-        next.patch = 0;
-        next.pre = if params.pre {
-            next_prerelease(&before.0.pre)
+        next_v.minor += 1;
+        next_v.patch = 0;
+        next_v.pre = if params.pre {
+            next_prerelease(&before.v.pre)
         } else {
             Prerelease::from_str("").unwrap()
         };
     }
     if params.patch {
-        next.patch += 1;
-        next.pre = Prerelease::from_str("").unwrap();
+        next_v.patch += 1;
+        next_v.pre = Prerelease::from_str("").unwrap();
     }
     if params.pre {
         if before.is_prelease() {
-            next.pre = next_prerelease(&before.0.pre);
+            next_v.pre = next_prerelease(&before.v.pre);
         } else {
             if !(params.major || params.minor || params.patch) {
-                next.patch += 1;
-                next.pre = Prerelease::from_str("pre0").unwrap();
+                next_v.patch += 1;
+                next_v.pre = Prerelease::from_str("pre0").unwrap();
             }
         }
     }
-    Tag(next)
+    Tag {
+        prefix: before.prefix.clone(),
+        v: next_v,
+    }
 }
 
 fn next_prerelease(before: &Prerelease) -> Prerelease {
