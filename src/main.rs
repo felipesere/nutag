@@ -386,7 +386,9 @@ fn increment_tag(before: Tag, params: &Args) -> Tag {
         };
     }
     if params.patch {
-        next_v.patch += 1;
+        if !before.is_prelease() {
+            next_v.patch += 1;
+        }
         next_v.pre = Prerelease::from_str("").unwrap();
     }
     if params.pre {
@@ -486,6 +488,23 @@ mod tests {
         );
 
         assert_eq!(after, Tag::try_from("v0.1.1-pre6").unwrap());
+    }
+
+    #[test]
+    fn bumps_to_the_version_without_pretag_suffix() {
+        let before = Tag::try_from("v0.1.1-pre5").unwrap();
+        let after = increment_tag(
+            before,
+            &crate::Args {
+                major: false,
+                minor: false,
+                patch: true,
+                pre: false,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(after, Tag::try_from("v0.1.1").unwrap());
     }
 
     #[test]
