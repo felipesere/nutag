@@ -131,7 +131,7 @@ fn main() -> Result<(), anyhow::Error> {
         .context("missing api tokent ($GITHUB_TOKEN) to talk to github")?;
 
     let url = git(&["config", "--get", "remote.origin.url"])?;
-    let extract_repo_name = Regex::new(r#"^([^:]+):TrueLayer/([^\.]+).git$"#).unwrap();
+    let extract_repo_name = Regex::new(r#"^([^:]+):TrueLayer/([^\.]+)(.git)?$"#).unwrap();
 
     let Some(caps) = extract_repo_name.captures(&url) else {
         bail!("Repo does not seem to be a TrueLayer one");
