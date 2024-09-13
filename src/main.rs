@@ -155,7 +155,7 @@ fn main() -> Result<(), anyhow::Error> {
     let query = indoc::indoc! {r#"
           query ($owner: String!, $name: String!, $endCursor: String) {
             repository(owner: $owner, name: $name) {
-              refs(refPrefix: "refs/tags/", first: 30, after: $endCursor, orderBy:{field: TAG_COMMIT_DATE, direction: DESC }) {
+              refs(refPrefix: "refs/tags/", first: 50, after: $endCursor, orderBy:{field: TAG_COMMIT_DATE, direction: DESC }) {
                  pageInfo {
                   endCursor
                   hasNextPage
@@ -240,7 +240,7 @@ fn main() -> Result<(), anyhow::Error> {
 
         info!("Creating tag {t}");
 
-        match git(&["tag", t.to_string().as_str()]) {
+        match git(&["tag", "-a", "-m", "test", t.to_string().as_str()]) {
             Ok(_) => {
                 info!("Successfully tagged {t}, pushing.");
 
