@@ -92,8 +92,21 @@ fn main() -> Result<(), anyhow::Error> {
         bail!("Can't set --major, --minor, --patch together");
     }
 
-    let branch_name = git(&["branch", "--show-current"])?;
-    let on_default_branch = ["main", "master"].contains(&branch_name.as_str());
+    let repo_type = detect_repo_type()?;
+    debug!("Detected repo type: {:?}", repo_type);
+
+    let on_default_branch = match repo_type {
+        RepoType::Git => {
+            let branch_name = git(&["branch", "--show-current"])?;
+            ["main", "master"].contains(&branch_name.as_str())
+        }
+        RepoType::Jj => {
+            // Check if '@' has 'main' bookmark
+            let bookmarks = jj(&["log", "-r", "@", "-T", "bookmarks"])?;
+            debug!("Current bookmarks: {}", bookmarks);
+            bookmarks.contains("main")
+        }
+    };
 
     if [args.major, args.minor, args.patch, args.pre]
         .iter()
@@ -123,6 +136,9 @@ fn main() -> Result<(), anyhow::Error> {
         warn!("On branches other than main/master '--pre' is implied");
         args.pre = true;
     }
+
+    // Get the commit to tag (for jj repos)
+    let commit_to_tag = get_commit_to_tag(repo_type, on_default_branch)?;
 
     info!("Updating local tags via git");
     let _ = git(&["fetch", "--tags"])?;
@@ -240,7 +256,15 @@ fn main() -> Result<(), anyhow::Error> {
 
         info!("Creating tag {t}");
 
-        match git(&["tag", "-a", "-m", "test", t.to_string().as_str()]) {
+        let tag_result = if let Some(ref commit) = commit_to_tag {
+            // For jj repos, tag the specific commit
+            git(&["tag", "-a", "-m", "test", t.to_string().as_str(), commit])
+        } else {
+            // For git repos, tag HEAD (default behavior)
+            git(&["tag", "-a", "-m", "test", t.to_string().as_str()])
+        };
+
+        match tag_result {
             Ok(_) => {
                 info!("Successfully tagged {t}, pushing.");
 
@@ -304,6 +328,62 @@ fn git(args: &[&str]) -> Result<String, anyhow::Error> {
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok(stdout)
+}
+
+fn jj(args: &[&str]) -> Result<String, anyhow::Error> {
+    let output = Command::new("jj").args(args).output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let args = args.join(" ");
+        anyhow::bail!(format!("jj {args} failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(stdout)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RepoType {
+    Git,
+    Jj,
+}
+
+fn detect_repo_type() -> Result<RepoType, anyhow::Error> {
+    // Check for .jj directory
+    if std::path::Path::new(".jj").exists() {
+        return Ok(RepoType::Jj);
+    }
+
+    // Check for .git directory
+    if std::path::Path::new(".git").exists() {
+        return Ok(RepoType::Git);
+    }
+
+    bail!("Not in a git or jj repository")
+}
+
+fn get_commit_to_tag(repo_type: RepoType, on_default_branch: bool) -> Result<Option<String>, anyhow::Error> {
+    match repo_type {
+        RepoType::Git => {
+            // For git, we don't need to specify a commit (tags HEAD by default)
+            Ok(None)
+        }
+        RepoType::Jj => {
+            // For jj, we need to get the git commit id
+            let commit_id = if on_default_branch {
+                // Tag trunk() when on main
+                info!("On main bookmark, tagging trunk()");
+                jj(&["log", "-r", "trunk()", "-T", "commit_id", "--no-graph"])?
+            } else {
+                // Tag @ for pretags
+                info!("Not on main bookmark, tagging @");
+                jj(&["log", "-r", "@", "-T", "commit_id", "--no-graph"])?
+            };
+            debug!("Commit to tag: {}", commit_id);
+            Ok(Some(commit_id))
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
