@@ -147,14 +147,15 @@ fn main() -> Result<(), anyhow::Error> {
         .context("missing api tokent ($GITHUB_TOKEN) to talk to github")?;
 
     let url = git(&["config", "--get", "remote.origin.url"])?;
-    let extract_repo_name = Regex::new(r#"^([^:]+):TrueLayer/([^\.]+)(.git)?$"#).unwrap();
+    let extract_repo_name = Regex::new(r#"^([^:]+):([^/]+)/([^\.]+)(.git)?$"#).unwrap();
 
     let Some(caps) = extract_repo_name.captures(&url) else {
-        bail!("Repo does not seem to be a TrueLayer one");
+        bail!("Unable to parse repository URL: {}", url);
     };
 
-    let name = &caps[2];
-    info!("Going to fetch tags for {name}");
+    let owner = &caps[2];
+    let name = &caps[3];
+    info!("Going to fetch tags for {owner}/{name}");
 
     #[derive(SerJson)]
     struct GqlRequest<'a> {
@@ -164,7 +165,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     #[derive(SerJson)]
     struct Variables<'a> {
-        owner: &'static str,
+        owner: &'a str,
         name: &'a str,
     }
 
@@ -188,7 +189,7 @@ fn main() -> Result<(), anyhow::Error> {
     let body = nanoserde::SerJson::serialize_json(&GqlRequest {
         query,
         variables: Variables {
-            owner: "TrueLayer",
+            owner,
             name,
         },
     });
