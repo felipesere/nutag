@@ -188,29 +188,23 @@ fn main() -> Result<(), anyhow::Error> {
 
     let body = nanoserde::SerJson::serialize_json(&GqlRequest {
         query,
-        variables: Variables {
-            owner,
-            name,
-        },
+        variables: Variables { owner, name },
     });
 
     debug!("The query is:\n{body}");
 
     info!("Fetching tags...");
-    let response = ureq::post("https://api.github.com/graphql")
-        .set("Accept", "application/vnd.github+json")
-        .set("Authorization", &format!("Bearer {github_token}"))
-        .set("X-GitHub-Api-Version", "2022-11-28")
-        .send_bytes(body.as_bytes())?;
+    let mut response = ureq::post("https://api.github.com/graphql")
+        .header("Accept", "application/vnd.github+json")
+        .header("Authorization", &format!("Bearer {github_token}"))
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send(body.as_bytes())?;
 
     if response.status() != 200 {
-        error!(
-            "Failed to get tags from github: {}",
-            response.into_string()?
-        );
+        error!("Failed to get tags from github: {response:?}",);
         return Ok(());
     }
-    let body = response.into_string().unwrap();
+    let body = response.body_mut().read_to_string()?;
 
     let gql: Graphql =
         nanoserde::DeJson::deserialize_json(&body).context("to extract ref data from response")?;
@@ -364,7 +358,10 @@ fn detect_repo_type() -> Result<RepoType, anyhow::Error> {
     bail!("Not in a git or jj repository")
 }
 
-fn get_commit_to_tag(repo_type: RepoType, on_default_branch: bool) -> Result<Option<String>, anyhow::Error> {
+fn get_commit_to_tag(
+    repo_type: RepoType,
+    on_default_branch: bool,
+) -> Result<Option<String>, anyhow::Error> {
     match repo_type {
         RepoType::Git => {
             // For git, we don't need to specify a commit (tags HEAD by default)
@@ -475,11 +472,9 @@ fn increment_tag(before: Tag, params: &Args) -> Tag {
     if params.pre {
         if before.is_prelease() {
             next_v.pre = next_prerelease(&before.v.pre);
-        } else {
-            if !(params.major || params.minor || params.patch) {
-                next_v.patch += 1;
-                next_v.pre = Prerelease::from_str("pre0").unwrap();
-            }
+        } else if !(params.major || params.minor || params.patch) {
+            next_v.patch += 1;
+            next_v.pre = Prerelease::from_str("pre0").unwrap();
         }
     }
     Tag {
