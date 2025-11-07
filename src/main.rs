@@ -3,7 +3,7 @@ use std::process::Command;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context};
-use argh::FromArgs;
+use bpaf::*;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input};
 use log::{debug, error, info, warn};
@@ -12,36 +12,66 @@ use owo_colors::OwoColorize;
 use regex_lite::Regex;
 use semver::{BuildMetadata, Prerelease};
 
-#[derive(Debug, FromArgs)]
-/// Suggest the next version for tagging
+#[derive(Debug, Clone)]
 struct Args {
-    /// suggest the next major version
-    #[argh(switch)]
     major: bool,
-
-    /// suggest the next minor version
-    #[argh(switch)]
     minor: bool,
-
-    /// suggest the next patch version
-    #[argh(switch)]
     patch: bool,
-
-    /// suggest the next prerelease version
-    #[argh(switch)]
     pre: bool,
-
-    /// lower the log level to Debug
-    #[argh(switch)]
-    verbose: bool,
-
-    /// create the tag locally but don't push it
-    #[argh(switch)]
+    verbose: usize,
     no_push: bool,
-
-    /// a prefix to use when creating the tag
-    #[argh(positional)]
     prefix: Option<String>,
+}
+
+fn args() -> OptionParser<Args> {
+    let major = short('M')
+        .long("major")
+        .help("suggest the next major version")
+        .switch();
+
+    let minor = short('m')
+        .long("minor")
+        .help("suggest the next minor version")
+        .switch();
+
+    let patch = short('p')
+        .long("patch")
+        .help("suggest the next patch version")
+        .switch();
+
+    let pre = long("pre")
+        .help("suggest the next prerelease version")
+        .switch();
+
+    let verbose = short('v')
+        .long("verbose")
+        .help("Increase the verbosity\n You can specify it up to 3 times\n either as -v -v -v or as -vvv")
+        .req_flag(())
+        .many()
+        .map(|xs| xs.len())
+        .guard(|&x| x <= 3, "It doesn't get any more verbose than this");
+
+    let no_push = long("no-push")
+        .help("create the tag locally but don't push it")
+        .switch();
+
+    let prefix = long("prefix")
+        .help("a prefix to use when creating the tag")
+        .argument::<String>("PREFIX")
+        .optional();
+
+    construct!(Args {
+        major,
+        minor,
+        patch,
+        pre,
+        verbose,
+        no_push,
+        prefix,
+    })
+    .to_options()
+    .descr("Suggest the next version for tagging")
+    .version(env!("CARGO_PKG_VERSION"))
 }
 
 impl Default for Args {
@@ -51,7 +81,7 @@ impl Default for Args {
             minor: false,
             patch: false,
             pre: true,
-            verbose: false,
+            verbose: 0,
             no_push: false,
             prefix: None,
         }
@@ -59,29 +89,9 @@ impl Default for Args {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    let mut args: Args = argh::from_env();
+    let mut args = args().run();
 
-    let log_level = if args.verbose {
-        log::LevelFilter::Debug
-    } else {
-        log::LevelFilter::Warn
-    };
-
-    fern::Dispatch::new()
-        .format(move |out, message, record| {
-            let level = match record.level() {
-                log::Level::Error => "ERROR".red().to_string(),
-                log::Level::Warn => "WARN".yellow().to_string(),
-                log::Level::Info => "INFO".blue().to_string(),
-                log::Level::Debug => "DEBUG".green().to_string(),
-                log::Level::Trace => "TRACE".magenta().to_string(),
-            };
-
-            out.finish(format_args!("{level}: {message}",))
-        })
-        .level(log_level)
-        .chain(std::io::stderr())
-        .apply()?;
+    setup_logging(args.verbose)?;
 
     if [args.major, args.minor, args.patch]
         .iter()
@@ -121,10 +131,6 @@ fn main() -> Result<(), anyhow::Error> {
             info!("No flags given, assuming pretag");
             args.pre = true;
         }
-    }
-
-    if args.no_push {
-        warn!("Not going to push tag");
     }
 
     if on_default_branch && args.pre {
@@ -188,10 +194,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let body = nanoserde::SerJson::serialize_json(&GqlRequest {
         query,
-        variables: Variables {
-            owner,
-            name,
-        },
+        variables: Variables { owner, name },
     });
 
     debug!("The query is:\n{body}");
@@ -267,9 +270,11 @@ fn main() -> Result<(), anyhow::Error> {
 
         match tag_result {
             Ok(_) => {
-                info!("Successfully tagged {t}, pushing.");
+                info!("Successfully tagged {t}.");
 
-                if !args.no_push {
+                if args.no_push {
+                    warn!("Not going to push tag");
+                } else {
                     git(&["push", "--tags"])?;
                     info!("Done pushing tag");
                 }
@@ -289,6 +294,36 @@ fn main() -> Result<(), anyhow::Error> {
             }
         }
     }
+
+    Ok(())
+}
+
+fn setup_logging(verbosity: usize) -> Result<(), anyhow::Error> {
+    let mut base_config = fern::Dispatch::new().format(move |out, message, record| {
+        let level = match record.level() {
+            log::Level::Error => "ERROR".red().to_string(),
+            log::Level::Warn => "WARN".yellow().to_string(),
+            log::Level::Info => "INFO".blue().to_string(),
+            log::Level::Debug => "DEBUG".green().to_string(),
+            log::Level::Trace => "TRACE".magenta().to_string(),
+        };
+
+        let module = record.module_path().unwrap_or("unknown");
+
+        out.finish(format_args!("{level}:{module}: {message}",))
+    });
+
+    base_config = match verbosity {
+        0 => base_config.level(log::LevelFilter::Warn),
+        1 => base_config
+            .level(log::LevelFilter::Debug)
+            .level_for("rustls", log::LevelFilter::Warn)
+            .level_for("ureq", log::LevelFilter::Warn),
+        2 => base_config.level(log::LevelFilter::Debug),
+        3 => base_config.level(log::LevelFilter::Trace),
+        _ => unreachable!("verbosity > 3"),
+    };
+    base_config.chain(std::io::stderr()).apply()?;
 
     Ok(())
 }
@@ -364,7 +399,10 @@ fn detect_repo_type() -> Result<RepoType, anyhow::Error> {
     bail!("Not in a git or jj repository")
 }
 
-fn get_commit_to_tag(repo_type: RepoType, on_default_branch: bool) -> Result<Option<String>, anyhow::Error> {
+fn get_commit_to_tag(
+    repo_type: RepoType,
+    on_default_branch: bool,
+) -> Result<Option<String>, anyhow::Error> {
     match repo_type {
         RepoType::Git => {
             // For git, we don't need to specify a commit (tags HEAD by default)
