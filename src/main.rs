@@ -40,7 +40,7 @@ struct Args {
     no_push: bool,
 
     /// a prefix to use when creating the tag
-    #[argh(positional)]
+    #[argh(option)]
     prefix: Option<String>,
 }
 

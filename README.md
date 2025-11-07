@@ -96,15 +96,15 @@ nutag --major --pre
 
 ### Monorepo Support (Tag Prefixes)
 
-Use prefixes to tag specific packages or components in a monorepo:
+Use the `--prefix` option to tag specific packages or components in a monorepo:
 
 ```bash
 # Tag a specific package
-nutag my-package
+nutag --prefix my-package
 # Creates: my-package@v0.1.0
 
 # Bump minor version for a package
-nutag --minor my-package
+nutag --minor --prefix my-package
 # Example: my-package@v0.1.5 → my-package@v0.2.0
 ```
 
@@ -169,13 +169,13 @@ nutag --patch
 
 ```bash
 # Tag multiple packages independently
-nutag --minor api
+nutag --minor --prefix api
 # Creates: api@v0.2.0
 
-nutag --patch web-client
+nutag --patch --prefix web-client
 # Creates: web-client@v0.1.1
 
-nutag --major shared-utils
+nutag --major --prefix shared-utils
 # Creates: shared-utils@v1.0.0
 ```
 
