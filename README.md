@@ -110,6 +110,23 @@ nutag --minor my-package
 
 ### Development Workflow
 
+#### Tagging a Specific Commit
+
+Use the `-r` or `--ref` flag to tag a specific git reference instead of the default (HEAD for Git, @ or trunk() for Jujutsu):
+
+```bash
+# Tag the previous commit
+nutag -r @-
+# or
+nutag -r HEAD~1
+
+# Tag a specific commit hash
+nutag -r abc123f
+
+# Works with other flags too
+nutag --minor -r HEAD~2
+```
+
 #### Local Tag Creation (No Push)
 
 Create tags locally without pushing to remote:
@@ -133,12 +150,14 @@ nutag --verbose
 `nutag` automatically detects whether you're in a Git or Jujutsu repository:
 
 **Git repositories:**
-- Tags the current HEAD commit
-- Checks current branch with `git branch --show-current`
+- Tags the current HEAD commit (or commit specified with `-r`)
+- Resolves git references using `git rev-parse`
+- Checks current branch with `git branch --contains`
 
 **Jujutsu repositories:**
-- Tags `trunk()` when on main bookmark
+- Tags `trunk()` when on main bookmark (or commit specified with `-r`)
 - Tags `@` (current change) for prerelease versions
+- Resolves revset expressions using `jj log`
 - Checks for `main` bookmark on current change
 
 ## Examples

@@ -114,16 +114,14 @@ fn main() -> Result<(), anyhow::Error> {
     let repo_type = detect_repo_type()?;
     debug!("Detected repo type: {:?}", repo_type);
 
-    let on_default_branch = match repo_type {
-        RepoType::Git => {
-            let reference = args.reference.as_deref().unwrap_or("HEAD");
-            let branch_name = git(&["branch", "--contains", reference])?;
+    let on_default_branch = match (repo_type, args.reference) {
+        (RepoType::Git, None) => {
+            let branch_name = git(&["branch", "--show-current"])?;
             ["main", "master"].contains(&branch_name.as_str())
         }
         RepoType::Jj => {
             // Check if '@' has 'main' bookmark
-            let reference = args.reference.as_deref().unwrap_or("@");
-            let bookmarks = jj(&["log", "-r", reference, "-T", "bookmarks", "--no-graph"])?;
+            let bookmarks = jj(&["log", "-r", "@", "-T", "bookmarks"])?;
             debug!("Current bookmarks: {}", bookmarks);
             bookmarks.contains("main")
         }
@@ -325,8 +323,7 @@ fn setup_logging(verbosity: usize) -> Result<(), anyhow::Error> {
         1 => base_config
             .level(log::LevelFilter::Debug)
             .level_for("rustls", log::LevelFilter::Warn)
-            .level_for("ureq", log::LevelFilter::Warn)
-            .level_for("ureq_proto", log::LevelFilter::Warn),
+            .level_for("ureq", log::LevelFilter::Warn),
         2 => base_config.level(log::LevelFilter::Debug),
         3 => base_config.level(log::LevelFilter::Trace),
         _ => unreachable!("verbosity > 3"),
