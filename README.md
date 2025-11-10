@@ -23,6 +23,14 @@ export GITHUB_TOKEN=your_github_token_here
 
 ## Installation
 
+### Via Homebrew (macOS and Linux)
+
+```bash
+brew install felipesere/nutag/nutag
+```
+
+### From Source
+
 ```bash
 cargo install --path .
 ```
