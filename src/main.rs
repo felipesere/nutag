@@ -20,6 +20,7 @@ struct Args {
     pre: bool,
     verbose: usize,
     no_push: bool,
+    no_sign: bool,
     prefix: Option<String>,
     reference: Option<String>,
 }
@@ -56,6 +57,8 @@ fn args() -> OptionParser<Args> {
         .help("create the tag locally but don't push it")
         .switch();
 
+    let no_sign = long("no-sign").help("Don't sign the tag").switch();
+
     let prefix = long("prefix")
         .help("a prefix to use when creating the tag")
         .argument::<String>("PREFIX")
@@ -74,6 +77,7 @@ fn args() -> OptionParser<Args> {
         pre,
         verbose,
         no_push,
+        no_sign,
         prefix,
         reference,
     })
@@ -91,6 +95,7 @@ impl Default for Args {
             pre: true,
             verbose: 0,
             no_push: false,
+            no_sign: false,
             prefix: None,
             reference: None,
         }
@@ -265,14 +270,23 @@ fn main() -> Result<(), anyhow::Error> {
             .map_err(|e| anyhow::anyhow!(e))
             .and_then(Tag::try_from)?;
 
-        info!("Creating tag {t}");
+        let signed = if args.no_sign { "" } else { "signed" };
+        info!("Creating {signed} tag {t}");
+
+        let tag_arg = t.to_string();
+        let mut tagging_args = vec!["tag", "-a", "-s", "-m", "test", tag_arg.as_str()]
+            .into_iter()
+            // Drop the sining arg if needed
+            .filter(|&arg| if arg == "-s" { !args.no_sign } else { true })
+            .collect::<Vec<_>>();
 
         let tag_result = if let Some(ref commit) = commit_to_tag {
             // Tag the specific commit (either from -r flag or jj repo default)
-            git(&["tag", "-a", "-m", "test", t.to_string().as_str(), commit])
+            tagging_args.push(commit.as_str());
+            git(tagging_args.as_slice())
         } else {
             // Tag HEAD (default for git repos without -r flag)
-            git(&["tag", "-a", "-m", "test", t.to_string().as_str()])
+            git(tagging_args.as_slice())
         };
 
         match tag_result {
@@ -362,6 +376,7 @@ struct Name {
 }
 
 fn git(args: &[&str]) -> Result<String, anyhow::Error> {
+    log::debug!("Running 'git {}'", args.join(" "));
     let output = Command::new("git").args(args).output()?;
 
     if !output.status.success() {
@@ -375,6 +390,7 @@ fn git(args: &[&str]) -> Result<String, anyhow::Error> {
 }
 
 fn jj(args: &[&str]) -> Result<String, anyhow::Error> {
+    log::debug!("Running 'jj {}'", args.join(" "));
     let output = Command::new("jj").args(args).output()?;
 
     if !output.status.success() {
