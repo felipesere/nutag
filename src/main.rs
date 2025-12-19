@@ -70,6 +70,10 @@ fn args() -> OptionParser<Args> {
         .argument::<String>("REF")
         .optional();
 
+    let version = option_env!("TAG")
+        .and_then(|v| v.strip_prefix("v"))
+        .unwrap_or("unknwon");
+
     construct!(Args {
         major,
         minor,
@@ -83,7 +87,7 @@ fn args() -> OptionParser<Args> {
     })
     .to_options()
     .descr("Suggest the next version for tagging")
-    .version(env!("CARGO_PKG_VERSION"))
+    .version(version)
 }
 
 impl Default for Args {
