@@ -85,60 +85,19 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Make the Github release
+        uses: felipesere/actions/release@main
         with:
-          path: artifacts
+          owner: felipesere
+          application: nutag
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate checksums
-        run: |
-          cd artifacts
-          for dir in */; do
-            cd "$dir"
-            sha256sum *.tar.gz >> ../../SHA256SUMS
-            cd ..
-          done
-          cd ..
-          cat SHA256SUMS
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Make the Homebrew Tap release
+        uses: felipesere/actions/update-homebrew@main
         with:
-          files: |
-            artifacts/*/*.tar.gz
-            SHA256SUMS
-          body: |
-            ## Installation
-
-            ### Homebrew (macOS and Linux)
-            ```bash
-            brew install felipesere/nutag/nutag
-            ```
-
-            ### Manual Installation
-            Download the appropriate binary for your system:
-            - **macOS (Apple Silicon)**: nutag-macos-aarch64.tar.gz
-            - **macOS (Intel)**: nutag-macos-x86_64.tar.gz
-            - **Linux (x86_64)**: nutag-linux-x86_64.tar.gz
-            - **Linux (ARM64)**: nutag-linux-aarch64.tar.gz
-
-            Extract and install:
-            ```bash
-            tar xzf nutag-*.tar.gz
-            sudo mv nutag /usr/local/bin/
-            ```
-
-            Verify checksums with SHA256SUMS file.
-          draft: false
-          prerelease: ${{ contains(github.ref, 'pre') || contains(github.ref, 'rc') || contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Trigger formula update
-        if: ${{ !contains(github.ref, 'pre') && !contains(github.ref, 'rc') && !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') }}
-        run: gh workflow run update-formula.yml -f tag=${{ github.ref_name }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          owner: felipesere
+          application: nutag
+          formula: Nutag
+          application_token: ${{ secrets.GITHUB_TOKEN }}
+          homebrew_tap: felipesere/homebrew-tap
+          homebrew_tap_token: ${{ secrets.COMMITTER_TOKEN }}
