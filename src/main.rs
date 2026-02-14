@@ -195,7 +195,7 @@ fn main() -> Result<(), anyhow::Error> {
         name: &'a str,
     }
 
-    let query = indoc::indoc! {r#"
+    let query = r#"
           query ($owner: String!, $name: String!, $endCursor: String) {
             repository(owner: $owner, name: $name) {
               refs(refPrefix: "refs/tags/", first: 50, after: $endCursor, orderBy:{field: TAG_COMMIT_DATE, direction: DESC }) {
@@ -209,8 +209,7 @@ fn main() -> Result<(), anyhow::Error> {
               }
             }
           }
-        "#
-    };
+        "#;
 
     let body = nanoserde::SerJson::serialize_json(&GqlRequest {
         query,
