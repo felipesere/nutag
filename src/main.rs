@@ -327,7 +327,7 @@ fn setup_logging(verbosity: usize) -> Result<(), anyhow::Error> {
         let level = match record.level() {
             log::Level::Error => "ERROR".red().to_string(),
             log::Level::Warn => "WARN".yellow().to_string(),
-            log::Level::Info => "INFO".blue().to_string(),
+            log::Level::Info => "INFO ".blue().to_string(), // Extra space after for tidyness
             log::Level::Debug => "DEBUG".green().to_string(),
             log::Level::Trace => "TRACE".magenta().to_string(),
         };
