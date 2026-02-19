@@ -134,7 +134,7 @@ fn main() -> Result<(), anyhow::Error> {
             let reference = args.reference.as_deref().unwrap_or("@");
             let bookmarks = jj(&["log", "-r", reference, "-T", "bookmarks", "--no-graph"])?;
             debug!("Current bookmarks: {}", bookmarks);
-            bookmarks.contains("main")
+            is_default_bookmark(&bookmarks)
         }
     };
 
@@ -412,6 +412,10 @@ enum RepoType {
     Jj,
 }
 
+fn is_default_bookmark(bookmarks: &str) -> bool {
+    bookmarks.lines().any(|bookmark| bookmark == "main")
+}
+
 fn detect_repo_type() -> Result<RepoType, anyhow::Error> {
     // Check for .jj directory
     if std::path::Path::new(".jj").exists() {
@@ -584,6 +588,13 @@ fn next_prerelease(before: &Prerelease) -> Prerelease {
 #[cfg(test)]
 mod tests {
     use crate::{increment_tag, Tag};
+
+    #[test]
+    fn bookmarks_containing_main_are_not_the_default_branch() {
+        assert!(!crate::is_default_bookmark("new-domain-model"));
+        assert!(!crate::is_default_bookmark("maintain-stuff"));
+        assert!(crate::is_default_bookmark("main"));
+    }
 
     #[test]
     fn bumps_the_major_version() {
