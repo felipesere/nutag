@@ -127,7 +127,11 @@ fn main() -> Result<(), anyhow::Error> {
         RepoType::Git => {
             let reference = args.reference.as_deref().unwrap_or("HEAD");
             let branch_name = git(&["branch", "--contains", reference])?;
-            ["main", "master"].contains(&branch_name.as_str())
+            let branch_name = branch_name
+                .strip_prefix("*")
+                .map(|s| s.trim())
+                .unwrap_or(branch_name.as_str());
+            ["main", "master"].contains(&branch_name)
         }
         RepoType::Jj => {
             // Check if '@' has 'main' bookmark
