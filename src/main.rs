@@ -59,7 +59,7 @@ fn args() -> OptionParser<Args> {
 
     let no_sign = long("no-sign").help("Don't sign the tag").switch();
 
-    let prefix = long("drefix")
+    let prefix = long("prefix")
         .help("a prefix to use when creating the tag")
         .argument::<String>("PREFIX")
         .optional();
