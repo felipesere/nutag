@@ -59,7 +59,7 @@ fn args() -> OptionParser<Args> {
 
     let no_sign = long("no-sign").help("Don't sign the tag").switch();
 
-    let prefix = long("prefix")
+    let prefix = long("drefix")
         .help("a prefix to use when creating the tag")
         .argument::<String>("PREFIX")
         .optional();
@@ -573,7 +573,7 @@ fn increment_tag(before: Tag, params: &Args) -> Tag {
         }
     }
     Tag {
-        prefix: before.prefix.clone(),
+        prefix: params.prefix.clone().or(before.prefix),
         v: next_v,
     }
 }
@@ -615,6 +615,24 @@ mod tests {
         );
 
         assert_eq!(after, Tag::try_from("v1.0.0").unwrap());
+    }
+
+    #[test]
+    fn bumps_the_major_version_with_prefix() {
+        let before = Tag::try_from("v0.1.0").unwrap();
+        let after = increment_tag(
+            before,
+            &crate::Args {
+                major: true,
+                minor: false,
+                patch: false,
+                pre: false,
+                prefix: Some("foo".to_string()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(after, Tag::try_from("foo@v1.0.0").unwrap());
     }
 
     #[test]
