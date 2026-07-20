@@ -417,7 +417,9 @@ enum RepoType {
 }
 
 fn is_default_bookmark(bookmarks: &str) -> bool {
-    bookmarks.lines().any(|bookmark| bookmark == "main")
+    bookmarks
+        .lines()
+        .any(|bookmark| ["main", "master"].contains(&bookmark))
 }
 
 fn detect_repo_type() -> Result<RepoType, anyhow::Error> {
